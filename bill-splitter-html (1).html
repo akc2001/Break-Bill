@@ -12,7 +12,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useRef, useEffect } = React;
+    const { useState, useEffect } = React;
 
     function App() {
       const [people, setPeople] = useState([]);
@@ -23,36 +23,42 @@
       const [expensePayer, setExpensePayer] = useState('');
       const [expenseSplitType, setExpenseSplitType] = useState('everyone');
       const [expenseSplitWith, setExpenseSplitWith] = useState([]);
-      const [scanning, setScanning] = useState(false);
-      const [receiptPreview, setReceiptPreview] = useState(null);
-      const [receiptItems, setReceiptItems] = useState([]);
-      const [receiptExtras, setReceiptExtras] = useState({ tax: 0, tip: 0, fees: 0 });
-      const [showReceiptModal, setShowReceiptModal] = useState(false);
+      const [showClearModal, setShowClearModal] = useState(false);
       const [loaded, setLoaded] = useState(false);
-      const fileInputRef = useRef(null);
 
       useEffect(() => {
-        const saved = localStorage.getItem('breakBillData');
-        if (saved) {
-          const data = JSON.parse(saved);
-          setPeople(data.people || []);
-          setExpenses(data.expenses || []);
+        try {
+          const saved = localStorage.getItem('breakBillData');
+          if (saved) {
+            const data = JSON.parse(saved);
+            setPeople(data.people || []);
+            setExpenses(data.expenses || []);
+          }
+        } catch (e) {
+          console.log('Could not load saved data');
         }
         setLoaded(true);
       }, []);
 
       useEffect(() => {
         if (loaded) {
-          localStorage.setItem('breakBillData', JSON.stringify({ people, expenses }));
+          try {
+            localStorage.setItem('breakBillData', JSON.stringify({ people, expenses }));
+          } catch (e) {
+            console.log('Could not save data');
+          }
         }
       }, [people, expenses, loaded]);
 
       const clearAllData = () => {
-        if (confirm('Clear all data and start fresh?')) {
-          setPeople([]);
-          setExpenses([]);
+        setPeople([]);
+        setExpenses([]);
+        try {
           localStorage.removeItem('breakBillData');
+        } catch (e) {
+          console.log('Could not clear storage');
         }
+        setShowClearModal(false);
       };
 
       const addPerson = () => {
@@ -70,7 +76,7 @@
       const addExpense = () => {
         if (expenseDesc && expenseAmt && expensePayer) {
           const assignedTo = expenseSplitType === 'everyone' ? [...people] : expenseSplitWith;
-          if (assignedTo.length === 0) { alert('Select at least one person to split with!'); return; }
+          if (assignedTo.length === 0) { alert('Select at least one person!'); return; }
           setExpenses([...expenses, { id: Date.now(), desc: expenseDesc, amount: parseFloat(expenseAmt), payer: expensePayer, assignedTo }]);
           setExpenseDesc('');
           setExpenseAmt('');
@@ -89,123 +95,21 @@
         }
       };
 
-      const handleReceiptUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (people.length < 2) { alert('Add at least 2 people first!'); return; }
-
-        setScanning(true);
-        setReceiptPreview(URL.createObjectURL(file));
-
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64 = reader.result.split(',')[1];
-          try {
-            const response = await fetch("https://api.anthropic.com/v1/messages", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                model: "claude-sonnet-4-20250514",
-                max_tokens: 1500,
-                messages: [{
-                  role: "user",
-                  content: [
-                    { type: "image", source: { type: "base64", media_type: file.type, data: base64 }},
-                    { type: "text", text: `Analyze this receipt. Return ONLY valid JSON (no markdown, no backticks) in this exact format:
-{"items":[{"name":"item name","price":0.00}],"tax":0.00,"tip":0.00,"fees":0.00}
-- items: list each food/drink item with its price
-- tax: the tax amount (0 if not found)
-- tip: the tip/gratuity amount (0 if not found)
-- fees: any other fees like service charge (0 if not found)
-Do not include tax/tip/fees in items array.` }
-                  ]
-                }]
-              })
-            });
-
-            const data = await response.json();
-            let text = data.content[0].text.trim();
-            text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-            const parsed = JSON.parse(text);
-            
-            if (parsed.items && parsed.items.length > 0) {
-              setReceiptItems(parsed.items.map((item, i) => ({ ...item, id: Date.now() + i, assignedTo: [] })));
-              setReceiptExtras({ tax: parsed.tax || 0, tip: parsed.tip || 0, fees: parsed.fees || 0 });
-              setShowReceiptModal(true);
-            } else {
-              alert("Couldn't read items. Please enter manually.");
-            }
-          } catch (err) {
-            console.error(err);
-            alert("Error scanning receipt. Please enter manually.");
-          }
-          setScanning(false);
-        };
-        reader.readAsDataURL(file);
-      };
-
-      const togglePersonOnItem = (itemId, person) => {
-        setReceiptItems(receiptItems.map(item => {
-          if (item.id !== itemId) return item;
-          const assigned = item.assignedTo || [];
-          if (assigned.includes(person)) {
-            return { ...item, assignedTo: assigned.filter(p => p !== person) };
-          } else {
-            return { ...item, assignedTo: [...assigned, person] };
-          }
-        }));
-      };
-
-      const confirmReceiptItems = () => {
-        const extras = receiptExtras.tax + receiptExtras.tip + receiptExtras.fees;
-        const assignedItems = receiptItems.filter(item => item.assignedTo.length > 0);
-        if (assignedItems.length === 0) { alert('Assign at least one item to someone!'); return; }
-
-        const allAssignedPeople = [...new Set(assignedItems.flatMap(item => item.assignedTo))];
-        const extraPerPerson = extras / allAssignedPeople.length;
-
-        const personTotals = {};
-        allAssignedPeople.forEach(p => personTotals[p] = 0);
-
-        assignedItems.forEach(item => {
-          const splitAmt = item.price / item.assignedTo.length;
-          item.assignedTo.forEach(p => personTotals[p] += splitAmt);
-        });
-
-        allAssignedPeople.forEach(p => personTotals[p] += extraPerPerson);
-
-        const newExpenses = Object.entries(personTotals).map(([person, amount]) => ({
-          id: Date.now() + Math.random(),
-          desc: `Receipt items`,
-          amount: Math.round(amount * 100) / 100,
-          payer: expensePayer || people[0],
-          assignedTo: [person]
-        }));
-
-        setExpenses([...expenses, ...newExpenses]);
-        setShowReceiptModal(false);
-        setReceiptItems([]);
-        setReceiptPreview(null);
-      };
-
       const calculateSplit = () => {
         if (people.length === 0 || expenses.length === 0) return [];
         const balances = {};
         people.forEach(p => balances[p] = 0);
-        
         expenses.forEach(e => {
           balances[e.payer] += e.amount;
           const assigned = e.assignedTo || [e.payer];
           const perPerson = e.amount / assigned.length;
           assigned.forEach(p => { if (balances[p] !== undefined) balances[p] -= perPerson; });
         });
-
         const creditors = [], debtors = [];
         Object.entries(balances).forEach(([name, bal]) => {
           if (bal > 0.01) creditors.push({ name, amount: bal });
           else if (bal < -0.01) debtors.push({ name, amount: -bal });
         });
-        
         const settlements = [];
         creditors.sort((a, b) => b.amount - a.amount);
         debtors.sort((a, b) => b.amount - a.amount);
@@ -246,26 +150,7 @@ Do not include tax/tip/fees in items array.` }
             </div>
 
             <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
-              <h2 className="font-semibold text-gray-800 mb-3">💸 Expenses</h2>
-              
-              <div className="mb-4 p-3 border-2 border-dashed border-green-300 rounded-lg">
-                <input type="file" accept="image/*" capture="environment" onChange={handleReceiptUpload} ref={fileInputRef} className="hidden"/>
-                <p className="text-sm text-gray-600 mb-2">Who paid for this receipt?</p>
-                <select value={expensePayer} onChange={(e) => setExpensePayer(e.target.value)} className="w-full px-3 py-2 mb-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400">
-                  <option value="">Select payer</option>
-                  {people.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <button onClick={() => fileInputRef.current.click()} disabled={scanning || !expensePayer} className="w-full py-3 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg font-medium transition flex items-center justify-center gap-2 disabled:opacity-50">
-                  {scanning ? "🔍 Scanning..." : "📸 Scan Receipt"}
-                </button>
-              </div>
-
-              <div className="relative flex items-center my-4">
-                <div className="flex-grow border-t border-gray-300"></div>
-                <span className="mx-3 text-gray-400 text-sm">or add manually</span>
-                <div className="flex-grow border-t border-gray-300"></div>
-              </div>
-
+              <h2 className="font-semibold text-gray-800 mb-3">💸 Add Expense</h2>
               <div className="space-y-2 mb-3">
                 <input type="text" value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="What was it for?" className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400"/>
                 <div className="flex gap-2">
@@ -321,44 +206,52 @@ Do not include tax/tip/fees in items array.` }
               </div>
             </div>
 
-            <button onClick={clearAllData} className="w-full py-2 bg-red-100 text-red-600 rounded-xl font-medium hover:bg-red-200 transition">🗑️ Clear All & Start Fresh</button>
+            {people.length > 0 && expenses.length > 0 && (
+              <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
+                <h2 className="font-semibold text-gray-800 mb-3">💰 Breakdown by Person</h2>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-2 text-gray-600 font-medium">Person</th>
+                      <th className="text-right py-2 text-gray-600 font-medium">Paid</th>
+                      <th className="text-right py-2 text-gray-600 font-medium">Owes</th>
+                      <th className="text-right py-2 text-gray-600 font-medium">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {people.map(p => {
+                      const paid = expenses.filter(e => e.payer === p).reduce((sum, e) => sum + e.amount, 0);
+                      const owes = expenses.reduce((sum, e) => {
+                        const assigned = e.assignedTo || [e.payer];
+                        if (assigned.includes(p)) return sum + (e.amount / assigned.length);
+                        return sum;
+                      }, 0);
+                      const balance = paid - owes;
+                      return (
+                        <tr key={p} className="border-b border-gray-100">
+                          <td className="py-2 font-medium text-gray-800">{p}</td>
+                          <td className="py-2 text-right text-green-600">${paid.toFixed(2)}</td>
+                          <td className="py-2 text-right text-red-500">${owes.toFixed(2)}</td>
+                          <td className={`py-2 text-right font-semibold ${balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>{balance >= 0 ? '+' : ''}{balance.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <button onClick={() => setShowClearModal(true)} className="w-full py-2 bg-red-700 text-white rounded-xl font-medium hover:bg-red-800 transition">🗑️ Clear and Restart</button>
           </div>
 
-          {showReceiptModal && (
+          {showClearModal && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl p-4 max-w-md w-full max-h-[90vh] overflow-y-auto">
-                <h2 className="text-xl font-bold text-gray-800 mb-2">🧾 Assign Items</h2>
-                <p className="text-sm text-gray-500 mb-4">Tap names to assign each item. Tax, tip & fees split among assigned people.</p>
-                
-                <div className="space-y-3 mb-4">
-                  {receiptItems.map(item => (
-                    <div key={item.id} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between mb-2">
-                        <span className="font-medium text-gray-800">{item.name}</span>
-                        <span className="text-green-600 font-semibold">${item.price.toFixed(2)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {people.map(p => (
-                          <button key={p} onClick={() => togglePersonOnItem(item.id, p)} className={`px-2 py-1 rounded-full text-xs font-medium transition ${item.assignedTo.includes(p) ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>{p}</button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="p-3 bg-blue-50 rounded-lg mb-4">
-                  <p className="text-sm font-medium text-blue-800 mb-1">Shared costs (split evenly):</p>
-                  <div className="text-sm text-blue-600">
-                    {receiptExtras.tax > 0 && <span className="mr-3">Tax: ${receiptExtras.tax.toFixed(2)}</span>}
-                    {receiptExtras.tip > 0 && <span className="mr-3">Tip: ${receiptExtras.tip.toFixed(2)}</span>}
-                    {receiptExtras.fees > 0 && <span>Fees: ${receiptExtras.fees.toFixed(2)}</span>}
-                    {receiptExtras.tax === 0 && receiptExtras.tip === 0 && receiptExtras.fees === 0 && <span>None found</span>}
-                  </div>
-                </div>
-
+              <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+                <h2 className="text-xl font-bold text-gray-800 mb-2">Clear all data?</h2>
+                <p className="text-gray-500 mb-4">This will remove all people and expenses.</p>
                 <div className="flex gap-2">
-                  <button onClick={() => { setShowReceiptModal(false); setReceiptItems([]); }} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">Cancel</button>
-                  <button onClick={confirmReceiptItems} className="flex-1 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">Confirm</button>
+                  <button onClick={() => setShowClearModal(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">Cancel</button>
+                  <button onClick={clearAllData} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition">Clear and Restart</button>
                 </div>
               </div>
             </div>
