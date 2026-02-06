@@ -100,32 +100,47 @@
 
       const calculateSplit = () => {
         if (people.length === 0 || expenses.length === 0) return [];
-        const balances = {};
-        people.forEach(p => balances[p] = 0);
+        
+        // Track direct debts between each pair of people
+        const debts = {};
+        people.forEach(p1 => {
+          debts[p1] = {};
+          people.forEach(p2 => {
+            debts[p1][p2] = 0;
+          });
+        });
+        
+        // Calculate who owes who for each expense
         expenses.forEach(e => {
-          balances[e.payer] += e.amount;
-          const assigned = e.assignedTo || [e.payer];
+          const payer = e.payer;
+          const assigned = e.assignedTo || [payer];
           const perPerson = e.amount / assigned.length;
-          assigned.forEach(p => { if (balances[p] !== undefined) balances[p] -= perPerson; });
+          
+          assigned.forEach(person => {
+            if (person !== payer) {
+              debts[person][payer] += perPerson;
+            }
+          });
         });
         
+        // Net out debts between pairs and create settlements
         const settlements = [];
-        const creditors = [];
-        const debtors = [];
+        const processed = {};
         
-        Object.entries(balances).forEach(([name, bal]) => {
-          if (bal > 0.01) creditors.push({ name, amount: bal });
-          else if (bal < -0.01) debtors.push({ name, amount: -bal });
-        });
-        
-        debtors.forEach(debtor => {
-          let remaining = debtor.amount;
-          creditors.forEach(creditor => {
-            if (remaining > 0.01 && creditor.amount > 0.01) {
-              const payment = Math.min(remaining, creditor.amount);
-              settlements.push({ from: debtor.name, to: creditor.name, amount: payment.toFixed(2) });
-              remaining -= payment;
-              creditor.amount -= payment;
+        people.forEach(p1 => {
+          people.forEach(p2 => {
+            if (p1 !== p2 && !processed[`${p1}-${p2}`] && !processed[`${p2}-${p1}`]) {
+              const p1OwesP2 = debts[p1][p2];
+              const p2OwesP1 = debts[p2][p1];
+              const net = p1OwesP2 - p2OwesP1;
+              
+              if (net > 0.01) {
+                settlements.push({ from: p1, to: p2, amount: net.toFixed(2) });
+              } else if (net < -0.01) {
+                settlements.push({ from: p2, to: p1, amount: (-net).toFixed(2) });
+              }
+              
+              processed[`${p1}-${p2}`] = true;
             }
           });
         });
