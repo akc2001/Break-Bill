@@ -85,7 +85,10 @@
         }
       };
 
-      const removeExpense = (id) => setExpenses(expenses.filter(e => e.id !== id));
+      const removeExpense = (id) => {
+        const updated = expenses.filter(e => e.id !== id);
+        setExpenses(updated);
+      };
 
       const toggleSplitPerson = (person) => {
         if (expenseSplitWith.includes(person)) {
@@ -97,31 +100,48 @@
 
       const calculateSplit = () => {
         if (people.length === 0 || expenses.length === 0) return [];
-        const balances = {};
-        people.forEach(p => balances[p] = 0);
+        
+        const debts = {};
+        people.forEach(p1 => {
+          debts[p1] = {};
+          people.forEach(p2 => {
+            debts[p1][p2] = 0;
+          });
+        });
+        
         expenses.forEach(e => {
-          balances[e.payer] += e.amount;
-          const assigned = e.assignedTo || [e.payer];
+          const payer = e.payer;
+          const assigned = e.assignedTo || [payer];
           const perPerson = e.amount / assigned.length;
-          assigned.forEach(p => { if (balances[p] !== undefined) balances[p] -= perPerson; });
+          
+          assigned.forEach(person => {
+            if (person !== payer) {
+              debts[person][payer] += perPerson;
+            }
+          });
         });
-        const creditors = [], debtors = [];
-        Object.entries(balances).forEach(([name, bal]) => {
-          if (bal > 0.01) creditors.push({ name, amount: bal });
-          else if (bal < -0.01) debtors.push({ name, amount: -bal });
-        });
+        
         const settlements = [];
-        creditors.sort((a, b) => b.amount - a.amount);
-        debtors.sort((a, b) => b.amount - a.amount);
-        let i = 0, j = 0;
-        while (i < creditors.length && j < debtors.length) {
-          const amt = Math.min(creditors[i].amount, debtors[j].amount);
-          if (amt > 0.01) settlements.push({ from: debtors[j].name, to: creditors[i].name, amount: amt.toFixed(2) });
-          creditors[i].amount -= amt;
-          debtors[j].amount -= amt;
-          if (creditors[i].amount < 0.01) i++;
-          if (debtors[j].amount < 0.01) j++;
-        }
+        const processed = {};
+        
+        people.forEach(p1 => {
+          people.forEach(p2 => {
+            if (p1 !== p2 && !processed[`${p1}-${p2}`] && !processed[`${p2}-${p1}`]) {
+              const p1OwesP2 = debts[p1][p2];
+              const p2OwesP1 = debts[p2][p1];
+              const net = p1OwesP2 - p2OwesP1;
+              
+              if (net > 0.01) {
+                settlements.push({ from: p1, to: p2, amount: net.toFixed(2) });
+              } else if (net < -0.01) {
+                settlements.push({ from: p2, to: p1, amount: (-net).toFixed(2) });
+              }
+              
+              processed[`${p1}-${p2}`] = true;
+            }
+          });
+        });
+        
         return settlements;
       };
 
@@ -129,93 +149,93 @@
       const settlements = calculateSplit();
 
       return (
-        <div className="min-h-screen bg-gradient-to-b from-green-500 via-green-700 to-green-900 p-4">
+        <div className="min-h-screen p-4" style={{backgroundColor: '#F1F3F2'}}>
           <div className="max-w-md mx-auto">
-            <h1 className="text-3xl font-bold text-white text-center mb-1">🧾 Break Bill</h1>
-            <p className="text-white/90 text-center mb-1">Split bills. Settle up. Done.</p>
-            <p className="text-white/60 text-center text-sm mb-4">✅ Auto-saves your progress</p>
+            <h1 className="text-3xl font-bold text-center mb-1" style={{color: '#2F3E36'}}>🧾 Break Bill</h1>
+            <p className="text-center mb-1" style={{color: '#2F3E36'}}>Split bills. Settle up. Done.</p>
+            <p className="text-center text-sm mb-4" style={{color: '#5F7A6A'}}>✅ Auto-saves your progress</p>
             
-            <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
-              <h2 className="font-semibold text-gray-800 mb-3">👥 People</h2>
+            <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
+              <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>👥 People</h2>
               <div className="flex gap-2 mb-3">
-                <input type="text" value={newPerson} onChange={(e) => setNewPerson(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addPerson()} placeholder="Enter name" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400"/>
-                <button onClick={addPerson} className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">Add</button>
+                <input type="text" value={newPerson} onChange={(e) => setNewPerson(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addPerson()} placeholder="Enter name" className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                <button onClick={addPerson} className="px-4 py-2 rounded-lg font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {people.map(p => (
-                  <span key={p} className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm flex items-center gap-1">{p}<button onClick={() => removePerson(p)} className="ml-1 hover:text-green-900">×</button></span>
+                  <span key={p} className="px-3 py-1 rounded-full text-sm flex items-center gap-1" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>{p}<button onClick={() => removePerson(p)} className="ml-1 hover:opacity-70">×</button></span>
                 ))}
-                {people.length === 0 && <p className="text-gray-400 text-sm">No people added yet</p>}
+                {people.length === 0 && <p className="text-sm" style={{color: '#5F7A6A'}}>No people added yet</p>}
               </div>
             </div>
 
-            <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
-              <h2 className="font-semibold text-gray-800 mb-3">💸 Add Expense</h2>
+            <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
+              <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>💸 Add Expense</h2>
               <div className="space-y-2 mb-3">
-                <input type="text" value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="What was it for?" className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400"/>
+                <input type="text" value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="What was it for?" className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
                 <div className="flex gap-2">
-                  <input type="number" value={expenseAmt} onChange={(e) => setExpenseAmt(e.target.value)} placeholder="Amount" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400"/>
-                  <select value={expensePayer} onChange={(e) => setExpensePayer(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-green-400">
+                  <input type="number" value={expenseAmt} onChange={(e) => setExpenseAmt(e.target.value)} placeholder="Amount" className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                  <select value={expensePayer} onChange={(e) => setExpensePayer(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}>
                     <option value="">Who paid?</option>
                     {people.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm font-medium text-gray-700 mb-2">Split between:</p>
+                <div className="p-3 rounded-lg" style={{backgroundColor: '#AFCBBE'}}>
+                  <p className="text-sm font-medium mb-2" style={{color: '#2F3E36'}}>Split between:</p>
                   <div className="flex gap-2 mb-2">
-                    <button onClick={() => setExpenseSplitType('everyone')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${expenseSplitType === 'everyone' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Everyone</button>
-                    <button onClick={() => setExpenseSplitType('select')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${expenseSplitType === 'select' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Select people</button>
+                    <button onClick={() => setExpenseSplitType('everyone')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'everyone' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'everyone' ? '#FFFFFF' : '#2F3E36'}}>Everyone</button>
+                    <button onClick={() => setExpenseSplitType('select')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'select' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'select' ? '#FFFFFF' : '#2F3E36'}}>Select people</button>
                   </div>
                   {expenseSplitType === 'select' && (
                     <div className="flex flex-wrap gap-1">
                       {people.map(p => (
-                        <button key={p} onClick={() => toggleSplitPerson(p)} className={`px-2 py-1 rounded-full text-xs font-medium transition ${expenseSplitWith.includes(p) ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>{p}</button>
+                        <button key={p} onClick={() => toggleSplitPerson(p)} className="px-2 py-1 rounded-full text-xs font-medium transition" style={{backgroundColor: expenseSplitWith.includes(p) ? '#5F7A6A' : '#FFFFFF', color: expenseSplitWith.includes(p) ? '#FFFFFF' : '#2F3E36'}}>{p}</button>
                       ))}
                     </div>
                   )}
                 </div>
-                <button onClick={addExpense} disabled={!expenseDesc || !expenseAmt || !expensePayer} className="w-full py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed">Add Expense</button>
+                <button onClick={addExpense} disabled={!expenseDesc || !expenseAmt || !expensePayer} className="w-full py-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add Expense</button>
               </div>
               <div className="space-y-2">
                 {expenses.map(e => (
-                  <div key={e.id} className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
-                    <div><p className="font-medium text-gray-800">{e.desc}</p><p className="text-sm text-gray-500">{e.payer} paid • {(e.assignedTo || []).join(', ')} owes</p></div>
-                    <div className="flex items-center gap-2"><span className="font-semibold text-green-600">${e.amount.toFixed(2)}</span><button onClick={() => removeExpense(e.id)} className="text-red-400 hover:text-red-600">×</button></div>
+                  <div key={e.id} className="flex justify-between items-center p-2 rounded-lg" style={{backgroundColor: '#F1F3F2'}}>
+                    <div><p className="font-medium" style={{color: '#2F3E36'}}>{e.desc}</p><p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid • {(e.assignedTo || []).join(', ')} owes</p></div>
+                    <div className="flex items-center gap-2"><span className="font-semibold" style={{color: '#2F3E36'}}>${e.amount.toFixed(2)}</span><button onClick={() => removeExpense(e.id)} className="hover:opacity-70" style={{color: '#5F7A6A'}}>×</button></div>
                   </div>
                 ))}
-                {expenses.length === 0 && <p className="text-gray-400 text-sm">No expenses added yet</p>}
+                {expenses.length === 0 && <p className="text-sm" style={{color: '#5F7A6A'}}>No expenses added yet</p>}
               </div>
             </div>
 
-            <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
-              <h2 className="font-semibold text-gray-800 mb-3">📊 Summary</h2>
-              <div className="mb-4 p-3 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg">
-                <p className="text-gray-600">Total spent</p>
-                <p className="text-2xl font-bold text-green-600">${total.toFixed(2)}</p>
+            <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
+              <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>📊 Summary</h2>
+              <div className="mb-4 p-3 rounded-lg" style={{backgroundColor: '#AFCBBE'}}>
+                <p style={{color: '#2F3E36'}}>Total spent</p>
+                <p className="text-2xl font-bold" style={{color: '#2F3E36'}}>${total.toFixed(2)}</p>
               </div>
-              <h3 className="font-medium text-gray-700 mb-2">Who owes who:</h3>
+              <h3 className="font-medium mb-2" style={{color: '#2F3E36'}}>Who owes who:</h3>
               <div className="space-y-2">
                 {settlements.length > 0 ? settlements.map((s, i) => (
-                  <div key={i} className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex justify-between items-center">
-                    <span className="text-gray-700"><strong>{s.from}</strong> pays <strong>{s.to}</strong></span>
-                    <span className="font-bold text-yellow-600">${s.amount}</span>
+                  <div key={i} className="p-3 rounded-lg flex justify-between items-center" style={{backgroundColor: '#F1F3F2'}}>
+                    <span style={{color: '#2F3E36'}}><strong>{s.from}</strong> pays <strong>{s.to}</strong></span>
+                    <span className="font-bold" style={{color: '#5F7A6A'}}>${s.amount}</span>
                   </div>
                 )) : (
-                  <p className="text-gray-400 text-sm">{people.length < 2 ? "Add at least 2 people" : expenses.length === 0 ? "Add some expenses" : "All settled up! 🎉"}</p>
+                  <p className="text-sm" style={{color: '#5F7A6A'}}>{people.length < 2 ? "Add at least 2 people" : expenses.length === 0 ? "Add some expenses" : "All settled up! 🎉"}</p>
                 )}
               </div>
             </div>
 
             {people.length > 0 && expenses.length > 0 && (
-              <div className="bg-white/90 backdrop-blur rounded-2xl p-4 mb-4 shadow-lg">
-                <h2 className="font-semibold text-gray-800 mb-3">💰 Breakdown by Person</h2>
+              <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
+                <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>💰 Breakdown by Person</h2>
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-2 text-gray-600 font-medium">Person</th>
-                      <th className="text-right py-2 text-gray-600 font-medium">Paid</th>
-                      <th className="text-right py-2 text-gray-600 font-medium">Owes</th>
-                      <th className="text-right py-2 text-gray-600 font-medium">Balance</th>
+                    <tr style={{borderBottom: '1px solid #AFCBBE'}}>
+                      <th className="text-left py-2 font-medium" style={{color: '#2F3E36'}}>Person</th>
+                      <th className="text-right py-2 font-medium" style={{color: '#2F3E36'}}>Paid</th>
+                      <th className="text-right py-2 font-medium" style={{color: '#2F3E36'}}>Owes</th>
+                      <th className="text-right py-2 font-medium" style={{color: '#2F3E36'}}>Balance</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -228,11 +248,11 @@
                       }, 0);
                       const balance = paid - owes;
                       return (
-                        <tr key={p} className="border-b border-gray-100">
-                          <td className="py-2 font-medium text-gray-800">{p}</td>
-                          <td className="py-2 text-right text-green-600">${paid.toFixed(2)}</td>
-                          <td className="py-2 text-right text-red-500">${owes.toFixed(2)}</td>
-                          <td className={`py-2 text-right font-semibold ${balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>{balance >= 0 ? '+' : ''}{balance.toFixed(2)}</td>
+                        <tr key={p} style={{borderBottom: '1px solid #AFCBBE'}}>
+                          <td className="py-2 font-medium" style={{color: '#2F3E36'}}>{p}</td>
+                          <td className="py-2 text-right" style={{color: '#5F7A6A'}}>${paid.toFixed(2)}</td>
+                          <td className="py-2 text-right" style={{color: '#5F7A6A'}}>${owes.toFixed(2)}</td>
+                          <td className="py-2 text-right font-semibold" style={{color: balance >= 0 ? '#5F7A6A' : '#8B5E5E'}}>{balance >= 0 ? '+' : ''}{balance.toFixed(2)}</td>
                         </tr>
                       );
                     })}
@@ -241,17 +261,17 @@
               </div>
             )}
 
-            <button onClick={() => setShowClearModal(true)} className="w-full py-2 bg-red-700 text-white rounded-xl font-medium hover:bg-red-800 transition">🗑️ Clear and Restart</button>
+            <button onClick={() => setShowClearModal(true)} className="w-full py-2 rounded-xl font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>🗑️ Clear and Restart</button>
           </div>
 
           {showClearModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
-                <h2 className="text-xl font-bold text-gray-800 mb-2">Clear all data?</h2>
-                <p className="text-gray-500 mb-4">This will remove all people and expenses.</p>
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{backgroundColor: 'rgba(47,62,54,0.5)'}}>
+              <div className="rounded-2xl p-6 max-w-sm w-full shadow-xl" style={{backgroundColor: '#FFFFFF'}}>
+                <h2 className="text-xl font-bold mb-2" style={{color: '#2F3E36'}}>Clear all data?</h2>
+                <p className="mb-4" style={{color: '#5F7A6A'}}>This will remove all people and expenses.</p>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowClearModal(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">Cancel</button>
-                  <button onClick={clearAllData} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition">Clear and Restart</button>
+                  <button onClick={() => setShowClearModal(false)} className="flex-1 py-2 rounded-lg font-medium transition" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>Cancel</button>
+                  <button onClick={clearAllData} className="flex-1 py-2 rounded-lg font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Clear and Restart</button>
                 </div>
               </div>
             </div>
