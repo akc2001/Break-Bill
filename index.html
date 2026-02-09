@@ -23,7 +23,10 @@
       const [expensePayer, setExpensePayer] = useState('');
       const [expenseSplitType, setExpenseSplitType] = useState('everyone');
       const [expenseSplitWith, setExpenseSplitWith] = useState([]);
+      const [expenseCustomAmounts, setExpenseCustomAmounts] = useState({});
+      const [expenseExtraFees, setExpenseExtraFees] = useState('');
       const [showClearModal, setShowClearModal] = useState(false);
+      const [expandedExpense, setExpandedExpense] = useState(null);
       const [loaded, setLoaded] = useState(false);
 
       useEffect(() => {
@@ -75,13 +78,31 @@
 
       const addExpense = () => {
         if (expenseDesc && expenseAmt && expensePayer) {
-          const assignedTo = expenseSplitType === 'everyone' ? [...people] : expenseSplitWith;
+          let assignedTo, customAmounts = null;
+          
+          if (expenseSplitType === 'everyone') {
+            assignedTo = [...people];
+          } else if (expenseSplitType === 'select') {
+            assignedTo = expenseSplitWith;
+          } else if (expenseSplitType === 'custom') {
+            assignedTo = Object.keys(expenseCustomAmounts).filter(p => expenseCustomAmounts[p] > 0);
+            const extraFee = parseFloat(expenseExtraFees) || 0;
+            const feePerPerson = assignedTo.length > 0 ? extraFee / assignedTo.length : 0;
+            customAmounts = {};
+            assignedTo.forEach(p => {
+              customAmounts[p] = (expenseCustomAmounts[p] || 0) + feePerPerson;
+            });
+          }
+          
           if (assignedTo.length === 0) { alert('Select at least one person!'); return; }
-          setExpenses([...expenses, { id: Date.now(), desc: expenseDesc, amount: parseFloat(expenseAmt), payer: expensePayer, assignedTo }]);
+          
+          setExpenses([...expenses, { id: Date.now(), desc: expenseDesc, amount: parseFloat(expenseAmt), payer: expensePayer, assignedTo, customAmounts }]);
           setExpenseDesc('');
           setExpenseAmt('');
           setExpenseSplitType('everyone');
           setExpenseSplitWith([]);
+          setExpenseCustomAmounts({});
+          setExpenseExtraFees('');
         }
       };
 
@@ -98,6 +119,29 @@
         }
       };
 
+      const updateCustomAmount = (person, amount) => {
+        setExpenseCustomAmounts({...expenseCustomAmounts, [person]: parseFloat(amount) || 0});
+      };
+
+      const getExpenseBreakdown = (expense) => {
+        const assigned = expense.assignedTo || [expense.payer];
+        const breakdown = [];
+        
+        assigned.forEach(person => {
+          if (person !== expense.payer) {
+            let owedAmount;
+            if (expense.customAmounts && expense.customAmounts[person]) {
+              owedAmount = expense.customAmounts[person];
+            } else {
+              owedAmount = expense.amount / assigned.length;
+            }
+            breakdown.push({ person, amount: owedAmount });
+          }
+        });
+        
+        return breakdown;
+      };
+
       const calculateSplit = () => {
         if (people.length === 0 || expenses.length === 0) return [];
         
@@ -112,11 +156,16 @@
         expenses.forEach(e => {
           const payer = e.payer;
           const assigned = e.assignedTo || [payer];
-          const perPerson = e.amount / assigned.length;
           
           assigned.forEach(person => {
             if (person !== payer) {
-              debts[person][payer] += perPerson;
+              let owedAmount;
+              if (e.customAmounts && e.customAmounts[person]) {
+                owedAmount = e.customAmounts[person];
+              } else {
+                owedAmount = e.amount / assigned.length;
+              }
+              debts[person][payer] += owedAmount;
             }
           });
         });
@@ -182,9 +231,10 @@
                 </div>
                 <div className="p-3 rounded-lg" style={{backgroundColor: '#AFCBBE'}}>
                   <p className="text-sm font-medium mb-2" style={{color: '#2F3E36'}}>Split between:</p>
-                  <div className="flex gap-2 mb-2">
+                  <div className="flex gap-2 mb-2 flex-wrap">
                     <button onClick={() => setExpenseSplitType('everyone')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'everyone' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'everyone' ? '#FFFFFF' : '#2F3E36'}}>Everyone</button>
-                    <button onClick={() => setExpenseSplitType('select')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'select' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'select' ? '#FFFFFF' : '#2F3E36'}}>Select people</button>
+                    <button onClick={() => setExpenseSplitType('select')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'select' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'select' ? '#FFFFFF' : '#2F3E36'}}>Select</button>
+                    <button onClick={() => setExpenseSplitType('custom')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'custom' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'custom' ? '#FFFFFF' : '#2F3E36'}}>Custom</button>
                   </div>
                   {expenseSplitType === 'select' && (
                     <div className="flex flex-wrap gap-1">
@@ -193,14 +243,49 @@
                       ))}
                     </div>
                   )}
+                  {expenseSplitType === 'custom' && (
+                    <div className="space-y-2">
+                      {people.map(p => (
+                        <div key={p} className="flex items-center gap-2">
+                          <span className="text-sm flex-1" style={{color: '#2F3E36'}}>{p}</span>
+                          <input type="number" placeholder="$0.00" value={expenseCustomAmounts[p] || ''} onChange={(e) => updateCustomAmount(p, e.target.value)} className="w-24 px-2 py-1 rounded-lg border text-sm text-right" style={{borderColor: '#5F7A6A', color: '#2F3E36'}}/>
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-2 pt-2" style={{borderTop: '1px solid #5F7A6A'}}>
+                        <span className="text-sm flex-1 font-medium" style={{color: '#2F3E36'}}>Extra fees (tax, tip)</span>
+                        <input type="number" placeholder="$0.00" value={expenseExtraFees} onChange={(e) => setExpenseExtraFees(e.target.value)} className="w-24 px-2 py-1 rounded-lg border text-sm text-right" style={{borderColor: '#5F7A6A', color: '#2F3E36'}}/>
+                      </div>
+                      <p className="text-xs" style={{color: '#2F3E36'}}>Subtotal: ${Object.values(expenseCustomAmounts).reduce((a,b) => a + (b || 0), 0).toFixed(2)} + Fees: ${parseFloat(expenseExtraFees) || 0} = Total: ${(Object.values(expenseCustomAmounts).reduce((a,b) => a + (b || 0), 0) + (parseFloat(expenseExtraFees) || 0)).toFixed(2)}</p>
+                    </div>
+                  )}
                 </div>
                 <button onClick={addExpense} disabled={!expenseDesc || !expenseAmt || !expensePayer} className="w-full py-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add Expense</button>
               </div>
               <div className="space-y-2">
                 {expenses.map(e => (
-                  <div key={e.id} className="flex justify-between items-center p-2 rounded-lg" style={{backgroundColor: '#F1F3F2'}}>
-                    <div><p className="font-medium" style={{color: '#2F3E36'}}>{e.desc}</p><p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid • {(e.assignedTo || []).join(', ')} owes</p></div>
-                    <div className="flex items-center gap-2"><span className="font-semibold" style={{color: '#2F3E36'}}>${e.amount.toFixed(2)}</span><button onClick={() => removeExpense(e.id)} className="hover:opacity-70" style={{color: '#5F7A6A'}}>×</button></div>
+                  <div key={e.id} className="rounded-lg overflow-hidden" style={{backgroundColor: '#F1F3F2'}}>
+                    <div className="flex justify-between items-center p-2 cursor-pointer" onClick={() => setExpandedExpense(expandedExpense === e.id ? null : e.id)}>
+                      <div><p className="font-medium" style={{color: '#2F3E36'}}>{e.desc}</p><p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid • {(e.assignedTo || []).join(', ')} owes</p></div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold" style={{color: '#2F3E36'}}>${e.amount.toFixed(2)}</span>
+                        <span style={{color: '#5F7A6A'}}>{expandedExpense === e.id ? '▲' : '▼'}</span>
+                        <button onClick={(ev) => { ev.stopPropagation(); removeExpense(e.id); }} className="hover:opacity-70" style={{color: '#5F7A6A'}}>×</button>
+                      </div>
+                    </div>
+                    {expandedExpense === e.id && (
+                      <div className="px-3 pb-3 pt-1 space-y-1" style={{borderTop: '1px solid #AFCBBE'}}>
+                        <p className="text-xs font-medium mb-1" style={{color: '#5F7A6A'}}>Breakdown:</p>
+                        {getExpenseBreakdown(e).map((item, i) => (
+                          <div key={i} className="flex justify-between text-sm">
+                            <span style={{color: '#2F3E36'}}>{item.person} owes {e.payer}</span>
+                            <span className="font-medium" style={{color: '#5F7A6A'}}>${item.amount.toFixed(2)}</span>
+                          </div>
+                        ))}
+                        {getExpenseBreakdown(e).length === 0 && (
+                          <p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid for themselves</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {expenses.length === 0 && <p className="text-sm" style={{color: '#5F7A6A'}}>No expenses added yet</p>}
@@ -243,7 +328,12 @@
                       const paid = expenses.filter(e => e.payer === p).reduce((sum, e) => sum + e.amount, 0);
                       const owes = expenses.reduce((sum, e) => {
                         const assigned = e.assignedTo || [e.payer];
-                        if (assigned.includes(p)) return sum + (e.amount / assigned.length);
+                        if (assigned.includes(p)) {
+                          if (e.customAmounts && e.customAmounts[p]) {
+                            return sum + e.customAmounts[p];
+                          }
+                          return sum + (e.amount / assigned.length);
+                        }
                         return sum;
                       }, 0);
                       const balance = paid - owes;
