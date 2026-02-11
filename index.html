@@ -19,6 +19,8 @@
       const [sessionCode, setSessionCode] = useState('');
       const [inputCode, setInputCode] = useState('');
       const [isNewSession, setIsNewSession] = useState(true);
+      const [useCustomCode, setUseCustomCode] = useState(false);
+      const [customCode, setCustomCode] = useState('');
       const [codeError, setCodeError] = useState('');
       const [people, setPeople] = useState([]);
       const [newPerson, setNewPerson] = useState('');
@@ -41,11 +43,26 @@
       };
 
       const createNewSession = () => {
-        const code = generateCode();
+        let code;
+        if (useCustomCode && customCode.trim().length >= 4) {
+          code = customCode.toUpperCase().trim().slice(0, 10);
+          const existing = localStorage.getItem('breakBill_' + code);
+          if (existing) {
+            setCodeError('Code already exists! Choose another.');
+            return;
+          }
+        } else if (useCustomCode) {
+          setCodeError('Code must be at least 4 characters');
+          return;
+        } else {
+          code = generateCode();
+        }
         setSessionCode(code);
         setPeople([]);
         setExpenses([]);
         setIsLoggedIn(true);
+        setCodeError('');
+        setCustomCode('');
         try {
           localStorage.setItem('breakBill_' + code, JSON.stringify({ people: [], expenses: [] }));
         } catch (e) {
@@ -55,8 +72,8 @@
 
       const joinSession = () => {
         const code = inputCode.toUpperCase().trim();
-        if (code.length !== 6) {
-          setCodeError('Code must be 6 characters');
+        if (code.length < 4) {
+          setCodeError('Code must be at least 4 characters');
           return;
         }
         try {
@@ -249,13 +266,25 @@
                 
                 {isNewSession ? (
                   <div>
-                    <p className="text-sm mb-4 text-center" style={{color: '#5F7A6A'}}>Start a new session. You'll get a code to return later.</p>
+                    <p className="text-sm mb-3 text-center" style={{color: '#5F7A6A'}}>Start a new session.</p>
+                    
+                    <div className="flex items-center gap-2 mb-3">
+                      <input type="checkbox" id="customCode" checked={useCustomCode} onChange={(e) => setUseCustomCode(e.target.checked)} className="w-4 h-4"/>
+                      <label htmlFor="customCode" className="text-sm" style={{color: '#2F3E36'}}>Create my own code</label>
+                    </div>
+                    
+                    {useCustomCode && (
+                      <input type="text" value={customCode} onChange={(e) => setCustomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))} placeholder="e.g. VEGAS2024" className="w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest font-mono mb-3" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                    )}
+                    
+                    {codeError && <p className="text-sm text-center mb-3" style={{color: '#c44'}}>{codeError}</p>}
+                    
                     <button onClick={createNewSession} className="w-full py-3 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Create New Session</button>
                   </div>
                 ) : (
                   <div>
-                    <p className="text-sm mb-3 text-center" style={{color: '#5F7A6A'}}>Enter your 6-character code.</p>
-                    <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value.toUpperCase().slice(0, 6))} placeholder="ABC123" className="w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest font-mono mb-3" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                    <p className="text-sm mb-3 text-center" style={{color: '#5F7A6A'}}>Enter your code (4-10 characters).</p>
+                    <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value.toUpperCase().slice(0, 10))} placeholder="Your code" className="w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest font-mono mb-3" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
                     {codeError && <p className="text-sm text-center mb-3" style={{color: '#c44'}}>{codeError}</p>}
                     <button onClick={joinSession} className="w-full py-3 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Continue Session</button>
                   </div>
