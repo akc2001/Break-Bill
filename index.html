@@ -15,6 +15,11 @@
     const { useState, useEffect } = React;
 
     function App() {
+      const [isLoggedIn, setIsLoggedIn] = useState(false);
+      const [sessionCode, setSessionCode] = useState('');
+      const [inputCode, setInputCode] = useState('');
+      const [isNewSession, setIsNewSession] = useState(true);
+      const [codeError, setCodeError] = useState('');
       const [people, setPeople] = useState([]);
       const [newPerson, setNewPerson] = useState('');
       const [expenses, setExpenses] = useState([]);
@@ -27,41 +32,78 @@
       const [expenseExtraFees, setExpenseExtraFees] = useState('');
       const [showClearModal, setShowClearModal] = useState(false);
       const [expandedExpense, setExpandedExpense] = useState(null);
-      const [loaded, setLoaded] = useState(false);
 
-      useEffect(() => {
+      const generateCode = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+      };
+
+      const createNewSession = () => {
+        const code = generateCode();
+        setSessionCode(code);
+        setPeople([]);
+        setExpenses([]);
+        setIsLoggedIn(true);
         try {
-          const saved = localStorage.getItem('breakBillData');
+          localStorage.setItem('breakBill_' + code, JSON.stringify({ people: [], expenses: [] }));
+        } catch (e) {
+          console.log('Could not save');
+        }
+      };
+
+      const joinSession = () => {
+        const code = inputCode.toUpperCase().trim();
+        if (code.length !== 6) {
+          setCodeError('Code must be 6 characters');
+          return;
+        }
+        try {
+          const saved = localStorage.getItem('breakBill_' + code);
           if (saved) {
             const data = JSON.parse(saved);
             setPeople(data.people || []);
             setExpenses(data.expenses || []);
+            setSessionCode(code);
+            setIsLoggedIn(true);
+            setCodeError('');
+          } else {
+            setCodeError('Session not found');
           }
         } catch (e) {
-          console.log('Could not load saved data');
+          setCodeError('Error loading session');
         }
-        setLoaded(true);
-      }, []);
+      };
+
+      const logout = () => {
+        setIsLoggedIn(false);
+        setSessionCode('');
+        setInputCode('');
+        setPeople([]);
+        setExpenses([]);
+      };
 
       useEffect(() => {
-        if (loaded) {
+        if (isLoggedIn && sessionCode) {
           try {
-            localStorage.setItem('breakBillData', JSON.stringify({ people, expenses }));
+            localStorage.setItem('breakBill_' + sessionCode, JSON.stringify({ people, expenses }));
           } catch (e) {
-            console.log('Could not save data');
+            console.log('Could not save');
           }
         }
-      }, [people, expenses, loaded]);
+      }, [people, expenses, isLoggedIn, sessionCode]);
 
       const clearAllData = () => {
         setPeople([]);
         setExpenses([]);
         try {
-          localStorage.removeItem('breakBillData');
+          localStorage.removeItem('breakBill_' + sessionCode);
         } catch (e) {
-          console.log('Could not clear storage');
+          console.log('Could not clear');
         }
         setShowClearModal(false);
+        logout();
       };
 
       const addPerson = () => {
@@ -78,7 +120,8 @@
 
       const addExpense = () => {
         if (expenseDesc && expenseAmt && expensePayer) {
-          let assignedTo, customAmounts = null;
+          let assignedTo = [];
+          let customAmounts = null;
           
           if (expenseSplitType === 'everyone') {
             assignedTo = [...people];
@@ -96,7 +139,7 @@
           
           if (assignedTo.length === 0) { alert('Select at least one person!'); return; }
           
-          setExpenses([...expenses, { id: Date.now(), desc: expenseDesc, amount: parseFloat(expenseAmt), payer: expensePayer, assignedTo, customAmounts }]);
+          setExpenses([...expenses, { id: Date.now(), desc: expenseDesc, amount: parseFloat(expenseAmt), payer: expensePayer, assignedTo: assignedTo, customAmounts: customAmounts }]);
           setExpenseDesc('');
           setExpenseAmt('');
           setExpenseSplitType('everyone');
@@ -107,8 +150,7 @@
       };
 
       const removeExpense = (id) => {
-        const updated = expenses.filter(e => e.id !== id);
-        setExpenses(updated);
+        setExpenses(expenses.filter(e => e.id !== id));
       };
 
       const toggleSplitPerson = (person) => {
@@ -126,7 +168,6 @@
       const getExpenseBreakdown = (expense) => {
         const assigned = expense.assignedTo || [expense.payer];
         const breakdown = [];
-        
         assigned.forEach(person => {
           if (person !== expense.payer) {
             let owedAmount;
@@ -135,10 +176,9 @@
             } else {
               owedAmount = expense.amount / assigned.length;
             }
-            breakdown.push({ person, amount: owedAmount });
+            breakdown.push({ person: person, amount: owedAmount });
           }
         });
-        
         return breakdown;
       };
 
@@ -156,7 +196,6 @@
         expenses.forEach(e => {
           const payer = e.payer;
           const assigned = e.assignedTo || [payer];
-          
           assigned.forEach(person => {
             if (person !== payer) {
               let owedAmount;
@@ -175,7 +214,7 @@
         
         people.forEach(p1 => {
           people.forEach(p2 => {
-            if (p1 !== p2 && !processed[`${p1}-${p2}`] && !processed[`${p2}-${p1}`]) {
+            if (p1 !== p2 && !processed[p1 + '-' + p2] && !processed[p2 + '-' + p1]) {
               const p1OwesP2 = debts[p1][p2];
               const p2OwesP1 = debts[p2][p1];
               const net = p1OwesP2 - p2OwesP1;
@@ -185,34 +224,64 @@
               } else if (net < -0.01) {
                 settlements.push({ from: p2, to: p1, amount: (-net).toFixed(2) });
               }
-              
-              processed[`${p1}-${p2}`] = true;
+              processed[p1 + '-' + p2] = true;
             }
           });
         });
-        
         return settlements;
       };
 
       const total = expenses.reduce((sum, e) => sum + e.amount, 0);
       const settlements = calculateSplit();
 
+      if (!isLoggedIn) {
+        return (
+          <div className="min-h-screen p-4 flex items-center justify-center" style={{backgroundColor: '#F1F3F2'}}>
+            <div className="max-w-sm w-full">
+              <h1 className="text-3xl font-bold text-center mb-1" style={{color: '#2F3E36'}}>🧾 Break Bill</h1>
+              <p className="text-center mb-6" style={{color: '#2F3E36'}}>Split bills. Settle up. Done.</p>
+              
+              <div className="rounded-2xl p-6 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
+                <div className="flex gap-2 mb-4">
+                  <button onClick={() => setIsNewSession(true)} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{backgroundColor: isNewSession ? '#5F7A6A' : '#F1F3F2', color: isNewSession ? '#FFFFFF' : '#2F3E36'}}>New Session</button>
+                  <button onClick={() => setIsNewSession(false)} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{backgroundColor: !isNewSession ? '#5F7A6A' : '#F1F3F2', color: !isNewSession ? '#FFFFFF' : '#2F3E36'}}>Enter Code</button>
+                </div>
+                
+                {isNewSession ? (
+                  <div>
+                    <p className="text-sm mb-4 text-center" style={{color: '#5F7A6A'}}>Start a new session. You'll get a code to return later.</p>
+                    <button onClick={createNewSession} className="w-full py-3 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Create New Session</button>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm mb-3 text-center" style={{color: '#5F7A6A'}}>Enter your 6-character code.</p>
+                    <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value.toUpperCase().slice(0, 6))} placeholder="ABC123" className="w-full px-4 py-3 rounded-lg border text-center text-xl tracking-widest font-mono mb-3" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                    {codeError && <p className="text-sm text-center mb-3" style={{color: '#c44'}}>{codeError}</p>}
+                    <button onClick={joinSession} className="w-full py-3 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Continue Session</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="min-h-screen p-4" style={{backgroundColor: '#F1F3F2'}}>
           <div className="max-w-md mx-auto">
             <h1 className="text-3xl font-bold text-center mb-1" style={{color: '#2F3E36'}}>🧾 Break Bill</h1>
             <p className="text-center mb-1" style={{color: '#2F3E36'}}>Split bills. Settle up. Done.</p>
-            <p className="text-center text-sm mb-4" style={{color: '#5F7A6A'}}>✅ Auto-saves your progress</p>
+            <p className="text-center text-sm mb-4" style={{color: '#5F7A6A'}}>Your code: <span className="font-mono font-bold" style={{color: '#2F3E36'}}>{sessionCode}</span></p>
             
             <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
               <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>👥 People</h2>
               <div className="flex gap-2 mb-3">
-                <input type="text" value={newPerson} onChange={(e) => setNewPerson(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addPerson()} placeholder="Enter name" className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
-                <button onClick={addPerson} className="px-4 py-2 rounded-lg font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add</button>
+                <input type="text" value={newPerson} onChange={(e) => setNewPerson(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addPerson()} placeholder="Enter name" className="flex-1 px-3 py-2 rounded-lg border" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                <button onClick={addPerson} className="px-4 py-2 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {people.map(p => (
-                  <span key={p} className="px-3 py-1 rounded-full text-sm flex items-center gap-1" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>{p}<button onClick={() => removePerson(p)} className="ml-1 hover:opacity-70">×</button></span>
+                  <span key={p} className="px-3 py-1 rounded-full text-sm flex items-center gap-1" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>{p}<button onClick={() => removePerson(p)} className="ml-1">×</button></span>
                 ))}
                 {people.length === 0 && <p className="text-sm" style={{color: '#5F7A6A'}}>No people added yet</p>}
               </div>
@@ -221,10 +290,10 @@
             <div className="rounded-2xl p-4 mb-4 shadow-lg" style={{backgroundColor: '#FFFFFF'}}>
               <h2 className="font-semibold mb-3" style={{color: '#2F3E36'}}>💸 Add Expense</h2>
               <div className="space-y-2 mb-3">
-                <input type="text" value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="What was it for?" className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                <input type="text" value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="What was it for?" className="w-full px-3 py-2 rounded-lg border" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
                 <div className="flex gap-2">
-                  <input type="number" value={expenseAmt} onChange={(e) => setExpenseAmt(e.target.value)} placeholder="Amount" className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
-                  <select value={expensePayer} onChange={(e) => setExpensePayer(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}>
+                  <input type="number" value={expenseAmt} onChange={(e) => setExpenseAmt(e.target.value)} placeholder="Amount" className="flex-1 px-3 py-2 rounded-lg border" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}/>
+                  <select value={expensePayer} onChange={(e) => setExpensePayer(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border" style={{borderColor: '#AFCBBE', color: '#2F3E36'}}>
                     <option value="">Who paid?</option>
                     {people.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -232,14 +301,14 @@
                 <div className="p-3 rounded-lg" style={{backgroundColor: '#AFCBBE'}}>
                   <p className="text-sm font-medium mb-2" style={{color: '#2F3E36'}}>Split between:</p>
                   <div className="flex gap-2 mb-2 flex-wrap">
-                    <button onClick={() => setExpenseSplitType('everyone')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'everyone' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'everyone' ? '#FFFFFF' : '#2F3E36'}}>Everyone</button>
-                    <button onClick={() => setExpenseSplitType('select')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'select' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'select' ? '#FFFFFF' : '#2F3E36'}}>Select</button>
-                    <button onClick={() => setExpenseSplitType('custom')} className="flex-1 py-2 rounded-lg text-sm font-medium transition" style={{backgroundColor: expenseSplitType === 'custom' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'custom' ? '#FFFFFF' : '#2F3E36'}}>Custom</button>
+                    <button onClick={() => setExpenseSplitType('everyone')} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{backgroundColor: expenseSplitType === 'everyone' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'everyone' ? '#FFFFFF' : '#2F3E36'}}>Everyone</button>
+                    <button onClick={() => setExpenseSplitType('select')} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{backgroundColor: expenseSplitType === 'select' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'select' ? '#FFFFFF' : '#2F3E36'}}>Select</button>
+                    <button onClick={() => setExpenseSplitType('custom')} className="flex-1 py-2 rounded-lg text-sm font-medium" style={{backgroundColor: expenseSplitType === 'custom' ? '#5F7A6A' : '#FFFFFF', color: expenseSplitType === 'custom' ? '#FFFFFF' : '#2F3E36'}}>Custom</button>
                   </div>
                   {expenseSplitType === 'select' && (
                     <div className="flex flex-wrap gap-1">
                       {people.map(p => (
-                        <button key={p} onClick={() => toggleSplitPerson(p)} className="px-2 py-1 rounded-full text-xs font-medium transition" style={{backgroundColor: expenseSplitWith.includes(p) ? '#5F7A6A' : '#FFFFFF', color: expenseSplitWith.includes(p) ? '#FFFFFF' : '#2F3E36'}}>{p}</button>
+                        <button key={p} onClick={() => toggleSplitPerson(p)} className="px-2 py-1 rounded-full text-xs font-medium" style={{backgroundColor: expenseSplitWith.includes(p) ? '#5F7A6A' : '#FFFFFF', color: expenseSplitWith.includes(p) ? '#FFFFFF' : '#2F3E36'}}>{p}</button>
                       ))}
                     </div>
                   )}
@@ -259,17 +328,17 @@
                     </div>
                   )}
                 </div>
-                <button onClick={addExpense} disabled={!expenseDesc || !expenseAmt || !expensePayer} className="w-full py-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add Expense</button>
+                <button onClick={addExpense} disabled={!expenseDesc || !expenseAmt || !expensePayer} className="w-full py-2 rounded-lg font-medium disabled:opacity-50" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Add Expense</button>
               </div>
               <div className="space-y-2">
                 {expenses.map(e => (
                   <div key={e.id} className="rounded-lg overflow-hidden" style={{backgroundColor: '#F1F3F2'}}>
                     <div className="flex justify-between items-center p-2 cursor-pointer" onClick={() => setExpandedExpense(expandedExpense === e.id ? null : e.id)}>
-                      <div><p className="font-medium" style={{color: '#2F3E36'}}>{e.desc}</p><p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid • {(e.assignedTo || []).join(', ')} owes</p></div>
+                      <div><p className="font-medium" style={{color: '#2F3E36'}}>{e.desc}</p><p className="text-sm" style={{color: '#5F7A6A'}}>{e.payer} paid</p></div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold" style={{color: '#2F3E36'}}>${e.amount.toFixed(2)}</span>
                         <span style={{color: '#5F7A6A'}}>{expandedExpense === e.id ? '▲' : '▼'}</span>
-                        <button onClick={(ev) => { ev.stopPropagation(); removeExpense(e.id); }} className="hover:opacity-70" style={{color: '#5F7A6A'}}>×</button>
+                        <button onClick={(ev) => { ev.stopPropagation(); removeExpense(e.id); }} style={{color: '#5F7A6A'}}>×</button>
                       </div>
                     </div>
                     {expandedExpense === e.id && (
@@ -351,17 +420,18 @@
               </div>
             )}
 
-            <button onClick={() => setShowClearModal(true)} className="w-full py-2 rounded-xl font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>🗑️ Clear and Restart</button>
+            <button onClick={() => setShowClearModal(true)} className="w-full py-2 rounded-xl font-medium mb-2" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>🗑️ Clear and Restart</button>
+            <button onClick={logout} className="w-full py-2 rounded-xl font-medium" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>🚪 Exit Session</button>
           </div>
 
           {showClearModal && (
             <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{backgroundColor: 'rgba(47,62,54,0.5)'}}>
               <div className="rounded-2xl p-6 max-w-sm w-full shadow-xl" style={{backgroundColor: '#FFFFFF'}}>
                 <h2 className="text-xl font-bold mb-2" style={{color: '#2F3E36'}}>Clear all data?</h2>
-                <p className="mb-4" style={{color: '#5F7A6A'}}>This will remove all people and expenses.</p>
+                <p className="mb-4" style={{color: '#5F7A6A'}}>This will delete this session permanently.</p>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowClearModal(false)} className="flex-1 py-2 rounded-lg font-medium transition" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>Cancel</button>
-                  <button onClick={clearAllData} className="flex-1 py-2 rounded-lg font-medium transition hover:opacity-80" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Clear and Restart</button>
+                  <button onClick={() => setShowClearModal(false)} className="flex-1 py-2 rounded-lg font-medium" style={{backgroundColor: '#AFCBBE', color: '#2F3E36'}}>Cancel</button>
+                  <button onClick={clearAllData} className="flex-1 py-2 rounded-lg font-medium" style={{backgroundColor: '#5F7A6A', color: '#FFFFFF'}}>Clear and Restart</button>
                 </div>
               </div>
             </div>
